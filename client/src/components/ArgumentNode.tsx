@@ -7,6 +7,10 @@ export interface ArgumentNodeData {
   kind: NodeKind;
   initialBelief: number;
   anchored: boolean;
+  /** 一键整理布局时锁定坐标（位置完全不变并作为相邻层锚点） */
+  positionLocked?: boolean;
+  /** 当前正在展示“一键整理布局”预览（节点为预览后的位置） */
+  layoutPreview?: boolean;
   /** 回放当前轮的可信度（未计算时为空） */
   displayBelief?: number;
   /** 相对上一轮的升降（第 0 轮为空） */
@@ -23,7 +27,17 @@ export interface ArgumentNodeData {
 
 const formatPercent = (value: number) => `${Math.round(value * 100)}%`;
 
-export function ArgumentNode({ data, selected }: NodeProps<ArgumentNodeData>) {
+/**
+ * 锁定 / 解锁节点位置。不把回调塞进 React Flow 的节点 data（那是可序列化的图数据），
+ * 而是派发一个由 App 监听的窗口事件，在那里统一走更新 + 保存逻辑。
+ */
+function dispatchTogglePositionLock(nodeId: string, locked: boolean) {
+  window.dispatchEvent(
+    new CustomEvent('argument:toggle-position-lock', { detail: { nodeId, locked } })
+  );
+}
+
+export function ArgumentNode({ id, data, selected }: NodeProps<ArgumentNodeData>) {
   const hasValue = typeof data.displayBelief === 'number';
   const colors = hasValue ? beliefColors(data.displayBelief!) : null;
   const delta = hasValue && typeof data.roundDelta === 'number' ? data.roundDelta : null;
@@ -39,7 +53,9 @@ export function ArgumentNode({ data, selected }: NodeProps<ArgumentNodeData>) {
         data.inTrace ? 'in-trace' : '',
         data.traceStart ? 'trace-start' : '',
         data.traceTarget ? 'trace-target' : '',
-        data.anchored ? 'anchored' : ''
+        data.anchored ? 'anchored' : '',
+        data.positionLocked ? 'position-locked' : '',
+        data.layoutPreview ? 'layout-preview-node' : ''
       ].join(' ')}
       style={colors ? { backgroundImage: `linear-gradient(${colors.tint}, ${colors.tint})` } : undefined}
     >
@@ -62,6 +78,27 @@ export function ArgumentNode({ data, selected }: NodeProps<ArgumentNodeData>) {
               固定
             </span>
           )}
+          {data.positionLocked && (
+            <span className="layout-lock-badge" title="一键整理布局时该节点坐标保持不变">
+              📌 锁定
+            </span>
+          )}
+          <button
+            type="button"
+            className={`pin-toggle ${data.positionLocked ? 'is-locked' : ''}`}
+            title={data.positionLocked ? '取消布局位置锁定' : '锁定布局位置（整理时坐标不变）'}
+            aria-pressed={Boolean(data.positionLocked)}
+            disabled={Boolean(data.layoutPreview)}
+            // 阻止冒泡到节点拖拽 / 选中。
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (data.layoutPreview) return;
+              dispatchTogglePositionLock(id, !data.positionLocked);
+            }}
+          >
+            {data.positionLocked ? '📌' : '📍'}
+          </button>
         </span>
       </div>
       <div className="node-label">{data.label}</div>

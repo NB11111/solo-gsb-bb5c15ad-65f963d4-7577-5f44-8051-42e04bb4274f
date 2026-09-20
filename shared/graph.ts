@@ -14,6 +14,8 @@ export interface GraphNode {
   initialBelief: number;
   /** 是否在传播中固定为先验值 */
   anchored: boolean;
+  /** 一键整理布局时是否锁定坐标：锁定节点位置完全保持不变，并作为相邻层的锚点 */
+  positionLocked?: boolean;
   position: Position;
 }
 

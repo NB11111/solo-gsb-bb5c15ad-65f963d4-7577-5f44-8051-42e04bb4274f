@@ -30,6 +30,7 @@ export function createGraphStore(databasePath: string): GraphStore {
       kind TEXT NOT NULL CHECK (kind IN ('claim', 'evidence')),
       initial_belief REAL NOT NULL CHECK (initial_belief BETWEEN 0 AND 1),
       anchored INTEGER NOT NULL DEFAULT 0,
+      position_locked INTEGER NOT NULL DEFAULT 0,
       pos_x REAL NOT NULL DEFAULT 0,
       pos_y REAL NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL
@@ -48,16 +49,25 @@ export function createGraphStore(databasePath: string): GraphStore {
     CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
   `);
 
+  // 旧版本数据库没有 position_locked 列：幂等补列，已有节点默认未锁定。
+  const nodeColumns = db.prepare('PRAGMA table_info(nodes)').all() as Array<{ name: string }>;
+  if (!nodeColumns.some((column) => column.name === 'position_locked')) {
+    db.exec('ALTER TABLE nodes ADD COLUMN position_locked INTEGER NOT NULL DEFAULT 0');
+  }
+
   const hydrate = (): GraphDocument => {
     const meta = db.prepare('SELECT name FROM graph_meta WHERE id = 1').get() as { name: string } | undefined;
     const nodeRows = db
-      .prepare('SELECT id, label, kind, initial_belief, anchored, pos_x, pos_y FROM nodes ORDER BY sort_order, rowid')
+      .prepare(
+        'SELECT id, label, kind, initial_belief, anchored, position_locked, pos_x, pos_y FROM nodes ORDER BY sort_order, rowid'
+      )
       .all() as Array<{
         id: string;
         label: string;
         kind: 'claim' | 'evidence';
         initial_belief: number;
         anchored: number;
+        position_locked: number;
         pos_x: number;
         pos_y: number;
       }>;
@@ -80,6 +90,7 @@ export function createGraphStore(databasePath: string): GraphStore {
         kind: row.kind,
         initialBelief: row.initial_belief,
         anchored: Boolean(row.anchored),
+        positionLocked: Boolean(row.position_locked),
         position: { x: row.pos_x, y: row.pos_y }
       })),
       edges: edgeRows.map((row) => ({
@@ -99,8 +110,8 @@ export function createGraphStore(databasePath: string): GraphStore {
       graph.name ?? '我的论证图'
     );
     const insertNode = db.prepare(
-      `INSERT INTO nodes (id, label, kind, initial_belief, anchored, pos_x, pos_y, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO nodes (id, label, kind, initial_belief, anchored, position_locked, pos_x, pos_y, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     graph.nodes.forEach((node, index) => {
       insertNode.run(
@@ -109,6 +120,7 @@ export function createGraphStore(databasePath: string): GraphStore {
         node.kind,
         node.initialBelief,
         node.anchored ? 1 : 0,
+        node.positionLocked ? 1 : 0,
         node.position.x,
         node.position.y,
         index

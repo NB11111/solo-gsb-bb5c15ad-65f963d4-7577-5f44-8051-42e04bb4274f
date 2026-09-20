@@ -36,8 +36,12 @@ interface SidePanelProps {
   selection: SelectionState;
   decomposition: RoundDecomposition | null;
   onUpdateNode: (id: string, patch: Partial<ArgumentNodeData>) => void;
+  /** 只切换“布局位置锁定”：不清空传播分析（属于布局属性，类似拖拽） */
+  onUpdateNodeLayoutLock: (id: string, locked: boolean) => void;
   onUpdateEdge: (id: string, patch: { weight?: number; stance?: Stance }) => void;
   onDeleteSelection: () => void;
+  /** 布局整理预览期间：禁止一切图结构 / 属性编辑（锁定切换也不可用，先确认或取消） */
+  graphEditingDisabled?: boolean;
   sensitivity: {
     selection: SensitivitySelection;
     onSelectionChange: (patch: Partial<SensitivitySelection>) => void;
@@ -188,8 +192,10 @@ export function SidePanel({
   selection,
   decomposition,
   onUpdateNode,
+  onUpdateNodeLayoutLock,
   onUpdateEdge,
   onDeleteSelection,
+  graphEditingDisabled = false,
   sensitivity,
   trace,
   nodes,
@@ -221,8 +227,11 @@ export function SidePanel({
 
       <section className="panel-card">
         <h2>检查器</h2>
+        {graphEditingDisabled && (
+          <p className="hint layout-disabled-hint">正在预览“一键整理布局”：请先<strong>确认应用</strong>或<strong>取消</strong>，再编辑图。</p>
+        )}
         {selection.node && (
-          <div className="inspector">
+          <fieldset className="inspector" disabled={graphEditingDisabled}>
             <Field label="标签">
               <input
                 value={selection.node.data.label}
@@ -262,14 +271,24 @@ export function SidePanel({
               />
               固定为初始可信度
             </label>
+            <label className="checkbox layout-lock-checkbox">
+              <input
+                type="checkbox"
+                checked={Boolean(selection.node.data.positionLocked)}
+                onChange={(event) =>
+                  onUpdateNodeLayoutLock(selection.node!.id, event.target.checked)
+                }
+              />
+              📌 整理布局时锁定该节点坐标
+            </label>
             <button className="danger" onClick={onDeleteSelection}>
               删除节点
             </button>
-          </div>
+          </fieldset>
         )}
 
         {!selection.node && selection.edge && (
-          <div className="inspector">
+          <fieldset className="inspector" disabled={graphEditingDisabled}>
             <Field label="关系">
               <select
                 value={(selection.edge.data?.stance as Stance) ?? 'support'}
@@ -296,7 +315,7 @@ export function SidePanel({
             <button className="danger" onClick={onDeleteSelection}>
               删除连线
             </button>
-          </div>
+          </fieldset>
         )}
 
         {!selection.node && !selection.edge && (
@@ -594,6 +613,7 @@ export function graphToDocument(name: string, nodes: Node<ArgumentNodeData>[], e
       kind: node.data.kind,
       initialBelief: node.data.initialBelief,
       anchored: node.data.anchored,
+      positionLocked: Boolean(node.data.positionLocked),
       position: { x: node.position.x, y: node.position.y }
     })),
     edges: edges.map((edge) => ({

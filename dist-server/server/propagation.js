@@ -48,6 +48,7 @@ export function validateGraphDocument(value) {
             kind: kind,
             initialBelief: node.initialBelief,
             anchored: Boolean(node.anchored),
+            positionLocked: Boolean(node.positionLocked),
             position: { x, y }
         };
     });

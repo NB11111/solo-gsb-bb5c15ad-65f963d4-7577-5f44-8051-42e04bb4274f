@@ -61,6 +61,7 @@ export function validateGraphDocument(value: unknown): GraphDocument {
       kind: kind as NodeKind,
       initialBelief: node.initialBelief,
       anchored: Boolean(node.anchored),
+      positionLocked: Boolean(node.positionLocked),
       position: { x, y }
     };
   });

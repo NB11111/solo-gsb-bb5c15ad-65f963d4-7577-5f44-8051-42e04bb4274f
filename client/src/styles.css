@@ -545,6 +545,143 @@ button.danger {
   background: #fef3c7;
 }
 
+.layout-lock-badge {
+  color: #0f766e;
+  background: #ccfbf1;
+}
+
+/* 节点右上角的布局锁定开关 */
+.pin-toggle {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+.pin-toggle.is-locked {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+  box-shadow: 0 0 0 2px rgb(20 184 166 / 18%);
+}
+
+.pin-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.layout-lock-checkbox {
+  margin: 2px 0 4px;
+  color: #0f766e;
+}
+
+/* 位置锁定节点：青色描边 + 点状纹理，区别于“传播固定”的虚线描边。 */
+.argument-node.position-locked {
+  border-color: #0d9488;
+  border-style: solid;
+  box-shadow: 0 0 0 3px rgb(20 184 166 / 14%), 0 10px 24px rgb(30 41 59 / 14%);
+}
+
+.argument-node.position-locked.anchored {
+  border-style: dashed;
+}
+
+/* 布局预览中的未锁定节点：琥珀色虚框，提示“这是预览位置，尚未保存”。 */
+.argument-node.layout-preview-node:not(.position-locked) {
+  border-color: #d97706;
+  border-style: dashed;
+  box-shadow: 0 0 0 3px rgb(217 119 6 / 12%), 0 12px 26px rgb(30 41 59 / 16%);
+}
+
+/* fieldset 复用作检查器容器：去掉默认边框，禁用时整体变灰 */
+fieldset.inspector {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+fieldset.inspector:disabled {
+  opacity: 0.6;
+}
+
+.layout-disabled-hint {
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: #92400e;
+  background: #fffbeb;
+}
+
+/* ---------- 一键整理布局预览条 ---------- */
+
+.layout-preview-bar {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 6;
+  width: min(760px, calc(100% - 32px));
+  transform: translateX(-50%);
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid #fcd34d;
+  border-radius: 14px;
+  background: rgb(255 251 235 / 97%);
+  box-shadow: 0 14px 34px rgb(120 53 15 / 18%);
+  pointer-events: auto;
+}
+
+.layout-preview-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.layout-preview-title {
+  color: #92400e;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.layout-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #78716c;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.layout-metric strong {
+  color: #1c1917;
+  font-size: 14px;
+}
+
+.layout-metric strong.better {
+  color: #15803d;
+}
+
+.layout-preview-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.layout-preview-actions button {
+  min-width: 110px;
+}
+
+.layout-preview-note {
+  margin: 0;
+  color: #a16207;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
 .node-label {
   margin: 7px 0;
   font-weight: 750;

@@ -17,6 +17,7 @@ import { ArgumentNode, nodeTypes, type ArgumentNodeData } from './components/Arg
 import { SidePanel, graphToDocument, type SensitivitySelection, type TraceSelection } from './components/SidePanel';
 import { ReplayBar } from './components/ReplayBar';
 import { buildRoundDecomposition } from './replay';
+import { planGraphLayout, formatDisplacement, type LayoutResult } from './layout';
 import type {
   GraphDocument,
   GraphNode,
@@ -44,11 +45,18 @@ const documentToFlow = (graph: GraphDocument): { nodes: Node<ArgumentNodeData>[]
       label: node.label,
       kind: node.kind,
       initialBelief: node.initialBelief,
-      anchored: node.anchored
+      anchored: node.anchored,
+      positionLocked: Boolean(node.positionLocked)
     }
   })),
   edges: graph.edges.map((edge) => makeEdge(edge))
 });
+
+/** 一键整理布局预览：仅存于前端状态，确认前不触碰画布数据与 SQLite。 */
+interface LayoutPreview {
+  /** 整理结果（含整理前后交叉数 / 总位移） */
+  plan: LayoutResult;
+}
 
 function makeEdge(edge: GraphEdge): Edge {
   return {
@@ -145,8 +153,18 @@ export default function App() {
   const [traceTracing, setTraceTracing] = useState(false);
   const [traceStatus, setTraceStatus] = useState('');
   const [traceActiveIndex, setTraceActiveIndex] = useState(0);
+  const [layoutPreview, setLayoutPreview] = useState<LayoutPreview | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  // 供窗口事件监听器读取最新画布，避免监听器闭包过期。
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+  const previewRef = useRef(layoutPreview);
+  previewRef.current = layoutPreview;
+  // 保存进入预览时的原始坐标，供取消 / 失效时还原。
+  const previewOriginRef = useRef<Record<string, { x: number; y: number }> | null>(null);
 
   const scheduleSave = useCallback(
     (nextNodes = nodes, nextEdges = edges, immediate = false) => {
@@ -163,6 +181,8 @@ export default function App() {
     },
     [documentName, edges, nodes]
   );
+  const scheduleSaveRef = useRef(scheduleSave);
+  scheduleSaveRef.current = scheduleSave;
 
   useEffect(() => {
     api
@@ -195,6 +215,84 @@ export default function App() {
     setTraceActiveIndex(0);
   }, []);
 
+  // 还原画布到进入预览前的坐标，并清掉预览标记（纯视图回退，不保存、不写 SQLite）。
+  const restoreOriginalLayout = useCallback(() => {
+    const originalPositions = previewOriginRef.current;
+    if (!originalPositions) return;
+    setNodes((prevNodes) =>
+      prevNodes.map((node) => ({
+        ...node,
+        position: originalPositions[node.id] ?? node.position,
+        data: { ...node.data, layoutPreview: false }
+      }))
+    );
+    previewOriginRef.current = null;
+  }, [setNodes]);
+
+  // 取消预览：画布恢复原样，绝不改写画布数据或 SQLite。
+  const cancelLayoutPreview = useCallback(() => {
+    if (!previewRef.current) return;
+    restoreOriginalLayout();
+    setLayoutPreview(null);
+  }, [restoreOriginalLayout]);
+
+  // 一键整理布局：纯前端计算并进入预览，不保存、不写 SQLite。
+  const startLayoutPreview = useCallback(() => {
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+    if (currentNodes.length === 0) return;
+    const plan = planGraphLayout(graphToDocument(documentName, currentNodes, currentEdges));
+    previewOriginRef.current = Object.fromEntries(
+      currentNodes.map((node) => [node.id, { ...node.position }])
+    );
+    setNodes(
+      currentNodes.map((node) => ({
+        ...node,
+        position: plan.positions[node.id] ?? node.position,
+        data: { ...node.data, layoutPreview: true }
+      }))
+    );
+    setLayoutPreview({ plan });
+  }, [documentName, setNodes]);
+
+  // 确认整理：一次性应用并沿用现有（防抖）保存逻辑。
+  const applyLayoutPreview = useCallback(() => {
+    if (!previewRef.current) return;
+    previewOriginRef.current = null;
+    const applied = nodesRef.current.map((node) => ({
+      ...node,
+      data: { ...node.data, layoutPreview: false }
+    }));
+    setNodes(applied);
+    // 位置整理不改变图结构：保留分析结果，仅持久化新坐标（与手动拖拽同一保存路径）。
+    scheduleSaveRef.current(applied, edgesRef.current);
+    setLayoutPreview(null);
+  }, [setNodes]);
+
+  // 锁定 / 解锁节点位置（走既有节点更新与保存逻辑）；预览期间禁用。
+  const togglePositionLock = useCallback(
+    (nodeId: string, locked: boolean) => {
+      if (previewRef.current) return;
+      const nextNodes = nodesRef.current.map((node) =>
+        node.id === nodeId ? { ...node, data: { ...node.data, positionLocked: locked } } : node
+      );
+      setNodes(nextNodes);
+      scheduleSaveRef.current(nextNodes, edgesRef.current);
+    },
+    [setNodes]
+  );
+
+  useEffect(() => {
+    const onToggle = (event: Event) => {
+      const detail = (event as CustomEvent<{ nodeId?: string; locked?: boolean }>).detail;
+      if (typeof detail?.nodeId === 'string' && typeof detail.locked === 'boolean') {
+        togglePositionLock(detail.nodeId, detail.locked);
+      }
+    };
+    window.addEventListener('argument:toggle-position-lock', onToggle);
+    return () => window.removeEventListener('argument:toggle-position-lock', onToggle);
+  }, [togglePositionLock]);
+
   const clearAnalysis = useCallback(
     (nextNodes = nodes, nextEdges = edges) => {
       setResult(null);
@@ -223,6 +321,7 @@ export default function App() {
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      if (previewRef.current) return;
       if (!connection.source || !connection.target) return;
       const edge = makeEdge({
         id: createId('edge'),
@@ -240,7 +339,8 @@ export default function App() {
 
   const onNodeDragStop: NodeMouseHandler = useCallback(
     (_event, node) => {
-      // 位置变化不清除计算结果，但需要持久化布局。
+      // 预览中节点不可拖拽；位置变化不清除计算结果，但需要持久化布局。
+      if (previewRef.current) return;
       const nextNodes = nodes.map((item) => (item.id === node.id ? node : item));
       scheduleSave(nextNodes, edges);
     },
@@ -248,6 +348,7 @@ export default function App() {
   );
 
   const addNode = (kind: 'claim' | 'evidence') => {
+    if (layoutPreview) return;
     const id = createId(kind);
     const node: Node<ArgumentNodeData> = {
       id,
@@ -257,7 +358,8 @@ export default function App() {
         label: kind === 'evidence' ? `证据 ${nodes.length + 1}` : `观点 ${nodes.length + 1}`,
         kind,
         initialBelief: kind === 'evidence' ? 0.8 : 0.5,
-        anchored: false
+        anchored: false,
+        positionLocked: false
       }
     };
     const nextNodes = [...nodes, node];
@@ -266,6 +368,7 @@ export default function App() {
   };
 
   const updateNode = (id: string, patch: Partial<ArgumentNodeData>) => {
+    if (layoutPreview) return;
     const nextNodes = nodes.map((node) =>
       node.id === id ? { ...node, data: { ...node.data, ...patch } } : node
     );
@@ -273,7 +376,14 @@ export default function App() {
     scheduleSave(nextNodes, edges);
   };
 
+  // 仅更新“布局位置锁定”标记：属于布局属性（类似拖拽），不清空传播分析结果。
+  const updateNodeLayoutLock = (id: string, locked: boolean) => {
+    if (layoutPreview) return;
+    togglePositionLock(id, locked);
+  };
+
   const updateEdge = (id: string, patch: { weight?: number; stance?: Stance }) => {
+    if (layoutPreview) return;
     const nextEdges = edges.map((edge) =>
       edge.id === id ? decorateEdge({ ...edge, data: { ...edge.data, ...patch } }, 'plain') : edge
     );
@@ -282,6 +392,7 @@ export default function App() {
   };
 
   const deleteSelection = useCallback(() => {
+    if (previewRef.current) return;
     let nextNodes = nodes;
     let nextEdges = edges;
     if (selectedNodeId) {
@@ -391,6 +502,7 @@ export default function App() {
     setResult(null);
     setReplayRound(0);
     setPlaying(false);
+    setLayoutPreview(null);
     invalidateSensitivity();
     setSensitivitySelection({ edgeId: '', targetNodeId: '' });
     invalidateTrace();
@@ -622,23 +734,43 @@ export default function App() {
             className="document-name"
             value={documentName}
             onChange={(event) => setDocumentName(event.target.value)}
-            onBlur={() => scheduleSave(nodes, edges, true)}
+            onBlur={() => {
+              if (!previewRef.current) scheduleSave(nodes, edges, true);
+            }}
           />
         </div>
         <div className="toolbar">
-          <button onClick={() => addNode('claim')}>＋ 观点</button>
-          <button onClick={() => addNode('evidence')}>＋ 证据</button>
+          <button onClick={() => addNode('claim')} disabled={Boolean(layoutPreview)}>
+            ＋ 观点
+          </button>
+          <button onClick={() => addNode('evidence')} disabled={Boolean(layoutPreview)}>
+            ＋ 证据
+          </button>
           <button className="primary" disabled={busy || nodes.length === 0} onClick={runPropagation}>
             {busy ? '计算中…' : '运行稳定性分析'}
           </button>
-          <button onClick={() => loadDocument(stableSample, true, DEFAULT_OPTIONS)}>载入稳定示例</button>
-          <button onClick={() => loadDocument(oscillatingSample, true, { ...DEFAULT_OPTIONS, lambda: 1 })}>
+          <button
+            disabled={nodes.length === 0 || Boolean(layoutPreview)}
+            onClick={startLayoutPreview}
+            title="把强连通分量压缩为 DAG 分层并执行 4 轮重心排序；锁定节点位置不变"
+          >
+            🧭 一键整理布局
+          </button>
+          <button onClick={() => loadDocument(stableSample, true, DEFAULT_OPTIONS)} disabled={Boolean(layoutPreview)}>
+            载入稳定示例
+          </button>
+          <button
+            onClick={() => loadDocument(oscillatingSample, true, { ...DEFAULT_OPTIONS, lambda: 1 })}
+            disabled={Boolean(layoutPreview)}
+          >
             载入振荡示例
           </button>
           <button onClick={exportJson} disabled={nodes.length === 0}>
             导出 JSON
           </button>
-          <button onClick={() => fileInputRef.current?.click()}>导入 JSON</button>
+          <button onClick={() => fileInputRef.current?.click()} disabled={Boolean(layoutPreview)}>
+            导入 JSON
+          </button>
           <input
             ref={fileInputRef}
             hidden
@@ -663,6 +795,8 @@ export default function App() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeDragStop={onNodeDragStop}
+            nodesDraggable={!layoutPreview}
+            nodesConnectable={!layoutPreview}
             onNodeClick={(_event, node) => {
               setSelectedNodeId(node.id);
               setSelectedEdgeId(null);
@@ -702,6 +836,42 @@ export default function App() {
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#c7d2fe" />
             <Controls />
           </ReactFlow>
+          {layoutPreview && (
+            <div className="layout-preview-bar" role="region" aria-label="一键整理布局预览">
+              <div className="layout-preview-metrics">
+                <span className="layout-preview-title">🧭 布局整理预览</span>
+                <span className="layout-metric">
+                  交叉数
+                  <strong className={layoutPreview.plan.after.crossings < layoutPreview.plan.before.crossings ? 'better' : ''}>
+                    {layoutPreview.plan.before.crossings} → {layoutPreview.plan.after.crossings}
+                  </strong>
+                </span>
+                <span className="layout-metric">
+                  总位移
+                  <strong>{formatDisplacement(layoutPreview.plan.after.totalDisplacement)}px</strong>
+                </span>
+                <span className="layout-metric">
+                  移动节点
+                  <strong>
+                    {layoutPreview.plan.after.movedCount}
+                  </strong>
+                </span>
+                <span className="layout-metric">
+                  锁定节点
+                  <strong>{layoutPreview.plan.after.lockedCount}</strong>
+                </span>
+              </div>
+              <div className="layout-preview-actions">
+                <button type="button" className="primary" onClick={applyLayoutPreview}>
+                  ✓ 确认应用
+                </button>
+                <button type="button" onClick={cancelLayoutPreview}>
+                  ✕ 取消
+                </button>
+              </div>
+              <p className="layout-preview-note">预览仅在前端：确认后一次性应用并保存；取消不会改写画布或 SQLite，任何图编辑都会使预览失效。</p>
+            </div>
+          )}
           <div className="canvas-footer">
             {result ? (
               <ReplayBar
@@ -727,8 +897,10 @@ export default function App() {
           selection={{ node: selectedNode, edge: selectedEdge }}
           decomposition={decomposition}
           onUpdateNode={updateNode}
+          onUpdateNodeLayoutLock={updateNodeLayoutLock}
           onUpdateEdge={updateEdge}
           onDeleteSelection={deleteSelection}
+          graphEditingDisabled={Boolean(layoutPreview)}
           nodes={nodes}
           edges={edges}
           sensitivity={{
