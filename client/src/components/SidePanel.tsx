@@ -36,6 +36,7 @@ interface SidePanelProps {
   selection: SelectionState;
   decomposition: RoundDecomposition | null;
   onUpdateNode: (id: string, patch: Partial<ArgumentNodeData>) => void;
+  onToggleLayoutLock: (id: string, locked: boolean) => void;
   onUpdateEdge: (id: string, patch: { weight?: number; stance?: Stance }) => void;
   onDeleteSelection: () => void;
   sensitivity: {
@@ -188,6 +189,7 @@ export function SidePanel({
   selection,
   decomposition,
   onUpdateNode,
+  onToggleLayoutLock,
   onUpdateEdge,
   onDeleteSelection,
   sensitivity,
@@ -261,6 +263,14 @@ export function SidePanel({
                 }
               />
               固定为初始可信度
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={Boolean(selection.node.data.layoutLocked)}
+                onChange={(event) => onToggleLayoutLock(selection.node!.id, event.target.checked)}
+              />
+              📌 整理布局时锁定此节点位置
             </label>
             <button className="danger" onClick={onDeleteSelection}>
               删除节点
@@ -594,6 +604,7 @@ export function graphToDocument(name: string, nodes: Node<ArgumentNodeData>[], e
       kind: node.data.kind,
       initialBelief: node.data.initialBelief,
       anchored: node.data.anchored,
+      layoutLocked: Boolean(node.data.layoutLocked),
       position: { x: node.position.x, y: node.position.y }
     })),
     edges: edges.map((edge) => ({

@@ -18,6 +18,10 @@ export interface ArgumentNodeData {
   traceStart?: boolean;
   /** 当前高亮路径的终点（目标节点） */
   traceTarget?: boolean;
+  /** 一键整理布局时坐标锁定 */
+  layoutLocked?: boolean;
+  /** 正在展示整理布局预览（虚线描边提示坐标尚未应用） */
+  layoutPreviewActive?: boolean;
   [key: string]: unknown;
 }
 
@@ -39,7 +43,9 @@ export function ArgumentNode({ data, selected }: NodeProps<ArgumentNodeData>) {
         data.inTrace ? 'in-trace' : '',
         data.traceStart ? 'trace-start' : '',
         data.traceTarget ? 'trace-target' : '',
-        data.anchored ? 'anchored' : ''
+        data.anchored ? 'anchored' : '',
+        data.layoutLocked ? 'layout-locked' : '',
+        data.layoutPreviewActive ? 'layout-previewing' : ''
       ].join(' ')}
       style={colors ? { backgroundImage: `linear-gradient(${colors.tint}, ${colors.tint})` } : undefined}
     >
@@ -60,6 +66,11 @@ export function ArgumentNode({ data, selected }: NodeProps<ArgumentNodeData>) {
           {data.anchored && (
             <span className="anchor-badge" title="传播中固定为先验可信度">
               固定
+            </span>
+          )}
+          {data.layoutLocked && (
+            <span className="layout-lock-badge" title="一键整理布局时该节点坐标保持不变，并作为相邻层锚点">
+              📌 位置锁定
             </span>
           )}
         </span>
